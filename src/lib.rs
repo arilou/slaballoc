@@ -3,4 +3,4 @@
 #![feature(allocator_api, maybe_uninit_slice)]
 
 mod slab;
-pub use slab::SlabAllocator;
+pub use slab::{SlabAlloc, SlabAllocError, SlabAllocator};
