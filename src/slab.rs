@@ -90,7 +90,10 @@ impl<T: Sized> SlabAllocator<T> {
                 b.write(AtomicU8::new(0));
             }
 
-            unsafe { MaybeUninit::slice_assume_init_mut(bitmap) }
+            // The memory is now initialized.
+            unsafe {
+                core::slice::from_raw_parts_mut(bitmap.as_mut_ptr() as *mut AtomicU8, bitmap.len())
+            }
         };
 
         Ok(Self {
