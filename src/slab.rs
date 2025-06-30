@@ -58,9 +58,9 @@ impl<T: Sized> SlabAllocator<T> {
     /// Create a new instance of this allocator.
     /// If the input parameters are invalid, this will return a [SlabError].
     pub fn new(mem: *mut MaybeUninit<u8>, size: usize) -> Result<Self, SlabError> {
-        // Ensure the size is aligned to the size of the contained objects.
-        if size & (core::mem::size_of::<T>() - 1) != 0 {
-            Err(SlabError::BadBaseAlignment)?;
+        // Verify the base address is aligned properly.
+        if (mem as usize) & (align_of::<T>() - 1) != 0 {
+            return Err(SlabError::BadBaseAlignment);
         }
 
         let element_size = core::cmp::max(core::mem::size_of::<T>(), core::mem::align_of::<T>());
