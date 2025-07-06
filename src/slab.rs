@@ -67,7 +67,7 @@ impl<T: Sized> SlabAllocator<T> {
 
         // Calculate the size of the data segment, subtracting out the ideal
         // bitmap size.
-        let data_size = size - div_ceil(size / element_size, 8);
+        let data_size = size - div_ceil(size / element_size, u8::BITS as usize);
 
         // Partition off the data first.
         // FIXME: Does this ensure the alignment of elements?
@@ -75,7 +75,7 @@ impl<T: Sized> SlabAllocator<T> {
 
         // Calculate the actual number of elements that can be stored in the data segment.
         let num_elems = data_size / element_size;
-        let bitmap_size = div_ceil(num_elems, 8);
+        let bitmap_size = div_ceil(num_elems, u8::BITS as usize);
 
         // Slice off the bitmap, taking care to initialize it.
         let bitmap = {
