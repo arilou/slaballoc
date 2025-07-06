@@ -63,7 +63,7 @@ impl<T: Sized> SlabAllocator<T> {
             return Err(SlabError::BadBaseAlignment);
         }
 
-        let element_size = core::cmp::max(core::mem::size_of::<T>(), core::mem::align_of::<T>());
+        let element_size = core::mem::size_of::<T>();
 
         // Calculate the size of the data segment, subtracting out the ideal
         // bitmap size.
