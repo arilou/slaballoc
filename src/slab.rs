@@ -148,12 +148,36 @@ impl<T: Sized> SlabAllocator<T> {
 
         Ok(SlabAlloc(self, unsafe { NonNull::new_unchecked(e) }))
     }
+
+    /// Constructs a `SlabAlloc` from a raw pointer.
+    ///
+    /// This function is analogous to [`Box::from_raw`].
+    ///
+    /// # Safety
+    ///
+    /// The raw pointer must be non-null, properly aligned, and have been previously
+    /// returned by a call to [`SlabAlloc::leak`] on an allocation from this allocator.
+    pub unsafe fn from_raw<'a>(&'a self, ptr: *mut T) -> SlabAlloc<'a, T> {
+        SlabAlloc(self, NonNull::new_unchecked(ptr))
+    }
 }
 
 /// A container structure for an allocation made in a [SlabAllocator].
 /// This is similar to a [core::alloc::Box].
 #[derive(Debug)]
 pub struct SlabAlloc<'a, T>(&'a SlabAllocator<T>, NonNull<T>);
+
+impl<'a, T> SlabAlloc<'a, T> {
+    /// Leaks the allocation, returning a mutable pointer to the contained value.
+    /// The returned pointer will be non-null and properly aligned.
+    ///
+    /// This function is analogous to [`Box::leak`].
+    pub fn leak(self) -> *mut T {
+        let ptr = self.1.as_ptr();
+        core::mem::forget(self);
+        ptr
+    }
+}
 
 impl<T> Drop for SlabAlloc<'_, T> {
     fn drop(&mut self) {
@@ -279,6 +303,100 @@ mod test {
         assert_eq!(allocs[2].data, 2);
 
         drop(allocs);
+        drop(alloc);
+        unsafe { std::alloc::dealloc(mem, layout) };
+    }
+
+    #[test]
+    fn test_leak() {
+        use super::*;
+
+        #[derive(Debug, PartialEq, Eq)]
+        struct Element {
+            data: usize,
+        }
+
+        let layout = Layout::from_size_align(1024, 8).unwrap();
+        let mem = unsafe { std::alloc::alloc(layout) };
+
+        let alloc: SlabAllocator<Element> =
+            SlabAllocator::new(mem as *mut MaybeUninit<u8>, layout.size()).unwrap();
+
+        let num_elems = alloc.num_elems;
+        assert!(num_elems > 0);
+
+        // Allocate all elements
+        let mut allocs = Vec::new();
+        for i in 0..num_elems {
+            allocs.push(alloc.allocate(Element { data: i }).unwrap());
+        }
+
+        // Ensure the next allocation fails.
+        assert_eq!(
+            SlabAllocError::HeapExhausted,
+            alloc.allocate(Element { data: 0 }).unwrap_err()
+        );
+
+        // Leak half of the allocations, and drop the other half.
+        let num_to_leak = num_elems / 2;
+        let num_to_drop = num_elems - num_to_leak;
+
+        let mut leaked = Vec::new();
+        for a in allocs.drain(0..num_to_leak) {
+            leaked.push(a.leak());
+        }
+
+        // The remaining elements are dropped here.
+        drop(allocs);
+
+        // We should be able to re-allocate the dropped elements.
+        let mut new_allocs = Vec::new();
+        for i in 0..num_to_drop {
+            new_allocs.push(alloc.allocate(Element { data: i }).unwrap());
+        }
+
+        // Ensure the next allocation fails.
+        assert_eq!(
+            SlabAllocError::HeapExhausted,
+            alloc.allocate(Element { data: 0 }).unwrap_err()
+        );
+
+        // Now, reconstruct and drop the leaked pointers.
+        for (i, p) in leaked.into_iter().enumerate() {
+            let b = unsafe { alloc.from_raw(p) };
+            assert_eq!(b.data, i);
+            drop(b);
+        }
+
+        // We should be able to allocate "num_to_leak" more elements.
+        let mut reclaimed_allocs = Vec::new();
+        for i in 0..num_to_leak {
+            reclaimed_allocs.push(alloc.allocate(Element { data: i }).unwrap());
+        }
+
+        // Ensure the next allocation fails.
+        assert_eq!(
+            SlabAllocError::HeapExhausted,
+            alloc.allocate(Element { data: 0 }).unwrap_err()
+        );
+
+        // Drop all allocations
+        drop(new_allocs);
+        drop(reclaimed_allocs);
+
+        // We should be able to allocate everything again.
+        let mut final_allocs = Vec::new();
+        for i in 0..num_elems {
+            final_allocs.push(alloc.allocate(Element { data: i }).unwrap());
+        }
+
+        // Ensure the next allocation fails.
+        assert_eq!(
+            SlabAllocError::HeapExhausted,
+            alloc.allocate(Element { data: 0 }).unwrap_err()
+        );
+
+        drop(final_allocs);
         drop(alloc);
         unsafe { std::alloc::dealloc(mem, layout) };
     }
